@@ -118,7 +118,8 @@ d <- plot %>%
         filter(is.na(planted),
                DESIGNCD %in% c(1, 506),
                MANUAL >= 1) %>% # for versions < 1, slope and aspect can't be attributed to subplots
-        select(PLOT_ID, SUBPLOT_ID, LON, LAT, ELEV, PLOT_STATUS_CD, POINT_NONSAMPLE_REASN_CD,
+        select(PLT_CN, STATECD, UNITCD, COUNTYCD, PLOT, INVYR,
+               PLOT_ID, SUBPLOT_ID, LON, LAT, ELEV, PLOT_STATUS_CD, POINT_NONSAMPLE_REASN_CD,
                SLOPE, ASPECT, GENUS, SPECIES) %>%
         clean_names() %>%
         mutate(lon = ifelse(lon>0, lon-360, lon)) %>%
@@ -134,7 +135,8 @@ d <- select(d, -point_nonsample_reasn_cd)
 
 # subplots, including those without trees
 sp <- d %>%
-        select(plot_id, subplot_id, lon, lat, slope, aspect) %>%
+        select(plt_cn, statecd, unitcd, countycd, plot, invyr,
+               plot_id, subplot_id, lon, lat, slope, aspect) %>%
         distinct()
 
 # tree occurrences
@@ -174,8 +176,13 @@ o$focal_spp <- o$gs %in% spp$gs
 
 ## export ############
 
-saveRDS(o, "data/derived/fia_occurrences.rds")
-saveRDS(sp, "data/derived/fia_subplots.rds")
+o %>% saveRDS("data/derived/fia_occurrences.rds")
+sp %>% saveRDS("data/derived/fia_subplots.rds")
+
+sp %>% select(statecd, unitcd, countycd, plot, invyr, lon, lat) %>%
+        distinct() %>%
+        write_csv("data/derived/fia_plot_coordinates.csv")
+
 
 # cleanup
 ls() %>% rm()
