@@ -1,6 +1,6 @@
 
 # This script adds climate and topographic variables for each FIA subplot.
-# inputs: fia_subplots.rds, and a TBD dataset with true plot coordinates
+# inputs: fia_subplots.rds; and fia_plot_coordinates.csv with true plot coordinates
 # output: fia_topoclimate.rds
 
 library(tidyverse)
@@ -17,10 +17,12 @@ conflict_prefer("extract", "raster", quiet = T)
 conflict_prefer("lag", "stats", quiet = T)
 
 
+coordinates_file <- "data/derived/fia_plot_coordinates.csv"
+
 
 # LOAD FIA DATA #######################
 
-sp <- readRDS("data/derived/fia_subplots.rds") # generated in fia_assemble.R
+sp <- readRDS("data/derived/fia_subplots.rds") # generated in 01_assemble.R
 
 
 
@@ -29,7 +31,16 @@ sp <- readRDS("data/derived/fia_subplots.rds") # generated in fia_assemble.R
 # stash a copy of fuzzed plot coordinates
 fuzz <- sp %>% select(subplot_id, lon, lat)
 
-# ** TO DO: swap in true plot coordinates here **
+# join to in true plot coordinates
+sp <- sp %>% select(-lon, -lat)
+sp <- read_csv(coordinates_file) %>%
+  inner_join(sp) %>%
+  filter(is.finite(lon))
+
+# remove merging variables and select unique locations
+sp <- sp %>% 
+  select(plot_id, subplot_id, lon, lat, slope, aspect) %>%
+  distinct()
 
 
 # derive subplot coordinates 
@@ -139,10 +150,6 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
   
   
   ### TPI ###
-  # this variable is not available elsewhere at 30m that I can find,
-  # and is too computationally burdensome to compute wall-to-wall,
-  # so rather than extracting it from a raster we are computing it here
-  # for just the neighborhood around each plot, based on an elevation raster.
   message("... computing TPI ...")
   
   # mTPI neighborhood radii, in meters
@@ -173,6 +180,7 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
     rw <- (id - cl) / ncol(dc) + 1
     
     tpi <- rep(NA, length(rr))
+    tpis <- rep(NA, length(rr))
     for(i in 1:length(rr)){
       r <- rr[i]
       fw <- fws[[paste0("r", r)]]
@@ -180,21 +188,26 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
       
       er <- e[(rw - rad):(rw + rad), 
               (cl - rad):(cl + rad)]
-      # if(extract(dc, matrix(c(x, y), 1)) != er[rad + 1, rad + 1]) stop("alignment issues 1")
       er <- as.vector(er)
       
-      # if(length(er) != length(fw)) stop("alignment issues 2")
       er[fw == 0] <- NA
       
-      # TPIs
+      # mTPI
       eo <- er[(length(er) + 1) / 2] # elev of central cell
       er <- na.omit(er[er != 0])
       le <- length(er)
       en <- sum(er) / le # mean elevation of neighborhood
+      tpi[i] <- eo - en
+      
+      # mTPIs
       es <- sqrt(sum((er - en)^2) / le) # standard deviation of elevation
-      tpi[i] <- (eo - en) / es # z-score
+      tpis[i] <- tpi[i] / es # z-score
+      
     }
-    mean(tpi, na.rm = T) # average TPI across radii
+    
+    # average TPI across radii
+    c(mtpi = mean(tpi, na.rm = T), 
+      mtpis = mean(tpis, na.rm = T))
   }
   
   # coordinates for extraction
@@ -204,28 +217,31 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
   e <- crop(e, dem) %>% as.data.frame()
   
   # compute mTPI in parallel
+  options(future.rng.onMisuse="ignore")
   plan(multisession, workers = detectCores() - 1)
-  e$tpi <- e %>%
+  tpi <- e %>%
     select(x = lon, y = lat) %>%
-    future_pmap_dbl(., possibly(mtpi, NA_real_), r = radii, dem = dem)
-  topo <- e %>% select(subplot_id, tpi) %>% right_join(topo)
+    future_pmap(., possibly(mtpi, NA_real_), r = radii, dem = dem)
+  e$tpi <- map_dbl(tpi, "mtpi")
+  e$tpis <- map_dbl(tpi, "mtpis")
+  topo <- e %>% select(subplot_id, tpi, tpis) %>% right_join(topo)
   
   return(topo)
 }
 
-topo_conus <- sp %>%
-  topography(veg_file = "data/landfire/LF2016_EVT_200_CONUS/Tif/LC16_EVT_200.tif", 
-             veg_dbf_file = "data/landfire/LF2016_EVT_200_CONUS/Tif/LC16_EVT_200.tif.vat.dbf", 
-             slope_file = "data/landfire/LF2016_Slp_200_CONUS/Tif/LC16_Slp_200.tif", 
-             aspect_file = "data/landfire/LF2016_Asp_200_CONUS/Tif/LC16_Asp_200.tif", 
-             elev_file = "data/landfire/LF2016_Elev_200_CONUS/Tif/LC16_Elev_200.tif")
-
 topo_ak <- sp %>%
-  topography(veg_file = "data/landfire/LF2016_EVT_200_AK/Tif/LA16_EVT_200.tif", 
-             veg_dbf_file = "data/landfire/LF2016_EVT_200_AK/Tif/LA16_EVT_200.tif.vat.dbf", 
-             slope_file = "data/landfire/LF2016_Slp_200_AK/Tif/LA16_Slp_200.tif", 
-             aspect_file = "data/landfire/LF2016_Asp_200_AK/Tif/LA16_Asp_200.tif", 
-             elev_file = "data/landfire/LF2016_Elev_200_AK/Tif/LA16_Elev_200.tif")
+  topography(veg_file = "data/raw/landfire/LF2016_EVT_200_AK/Tif/LA16_EVT_200.tif", 
+             veg_dbf_file = "data/raw/landfire/LF2016_EVT_200_AK/Tif/LA16_EVT_200.tif.vat.dbf", 
+             slope_file = "data/raw/landfire/LF2016_Slp_200_AK/Tif/LA16_Slp_200.tif", 
+             aspect_file = "data/raw/landfire/LF2016_Asp_200_AK/Tif/LA16_Asp_200.tif", 
+             elev_file = "data/raw/landfire/LF2016_Elev_200_AK/Tif/LA16_Elev_200.tif")
+
+topo_conus <- sp %>%
+  topography(veg_file = "data/raw/landfire/LF2016_EVT_200_CONUS/Tif/LC16_EVT_200.tif",
+             veg_dbf_file = "data/raw/landfire/LF2016_EVT_200_CONUS/Tif/LC16_EVT_200.tif.vat.dbf",
+             slope_file = "data/raw/landfire/LF2016_Slp_200_CONUS/Tif/LC16_Slp_200.tif",
+             aspect_file = "data/raw/landfire/LF2016_Asp_200_CONUS/Tif/LC16_Asp_200.tif",
+             elev_file = "data/raw/landfire/LF2016_Elev_200_CONUS/Tif/LC16_Elev_200.tif")
 
 topo <- bind_rows(topo_conus, topo_ak)
 # saveRDS(topo, "data/derived/topography.rds")
