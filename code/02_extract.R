@@ -122,4 +122,4 @@ sp <- sp %>%
   left_join(fuzz)
 
 # export data
-saveRDS(op, "data/derived/fia_topoclimate.rds")
+saveRDS(sp, "data/derived/fia_topoclimate.rds")
