@@ -73,7 +73,7 @@ plot <- fread("data/raw/fia/ENTIRE/PLOT.csv", stringsAsFactors = F,
 subplot <- fread("data/raw/fia/ENTIRE/SUBPLOT.csv", stringsAsFactors = F, 
                  colClasses = c(CN = "character", PLT_CN = "character")) %>% 
         select(PLT_CN, SUBP, SUBP_CN = CN, PREV_SBP_CN, POINT_NONSAMPLE_REASN_CD,
-                              SLOPE, ASPECT) %>% as_tibble() %>%
+               SLOPE, ASPECT) %>% as_tibble() %>%
         bind_rows(subplot_AK %>% mutate(PREV_SBP_CN = as.integer(PREV_SBP_CN)))
 
 # CONDITION table (used to identify and exclude planted plots)
@@ -82,7 +82,7 @@ subplot <- fread("data/raw/fia/ENTIRE/SUBPLOT.csv", stringsAsFactors = F,
 cond <- fread("data/raw/fia/ENTIRE/COND.csv", stringsAsFactors = F, 
               colClasses = c(CN = "character", PLT_CN = "character")) %>% 
         select(PLT_CN, CONDID, PROP_BASIS, STDORGCD, PHYSCLCD, COND_STATUS_CD, CONDPROP_UNADJ,
-                        SLOPE_COND = SLOPE, ASPECT_COND = ASPECT) %>% as_tibble() %>%
+               SLOPE_COND = SLOPE, ASPECT_COND = ASPECT) %>% as_tibble() %>%
         bind_rows(cond_AK)
 planted <- cond %>%
         filter(STDORGCD == 1) %>%
@@ -166,18 +166,17 @@ fia_spp <- read_xlsx("data/raw/fia/2019 Master Species FGver90_10_01_2019_rev_2_
 
 spp <- o %>%
         group_by(gs) %>%
-        summarize(#n_plot = length(unique(plot_id)),
-                n_subp = length(unique(subplot_id))) %>%
-        filter(n_subp > 100, # no rare species
-               gs %in% fia_spp$gs) # criteria from Katie
-
-o$focal_spp <- o$gs %in% spp$gs
+        summarize(n_plot = length(unique(plot_id)),
+                  n_subp = length(unique(subplot_id)),
+                  exclude = ! gs %in% fia_spp$gs) %>%
+        distinct()
 
 
 ## export ############
 
 o %>% saveRDS("data/derived/fia_occurrences.rds")
 sp %>% saveRDS("data/derived/fia_subplots.rds")
+spp %>% saveRDS("data/derived/fia_species.rds")
 
 sp %>% select(statecd, unitcd, countycd, plot, invyr, lon, lat) %>%
         distinct() %>%
