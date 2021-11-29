@@ -1,8 +1,11 @@
 
+# these functions are shared by the US and Canada extraction scripts
+
+
 
 # compute topographic position index (TPI) for a given point location
 # (standardized multi-scale TPI -- mTPIs sensu Theobald et al. (2015))
-mtpi <- function(x, y, radii, dem){
+mtpi <- function(x, y, radii, dem, fws){
         
         # neighborhood elevation data for the largest radius
         rr <- rev(sort(radii))
@@ -45,120 +48,6 @@ mtpi <- function(x, y, radii, dem){
         # average TPI across radii
         c(mtpi = mean(tpi, na.rm = T), 
           mtpis = mean(tpis, na.rm = T))
-}
-
-
-topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev_file){
-        
-        ### veg type ###
-        
-        # (used to select non-sampled FIA sites that are not forest or developed)
-        veg <- raster(veg_file)
-        
-        # prepare subplot locations for extraction
-        low_lat <- grepl("CONUS", veg_file)
-        e <- filter(sp, (lat < 50) == low_lat, is.finite(lat))
-        coordinates(e) <- c("lon", "lat")
-        crs(e) <- fia_crs
-        e <- spTransform(e, crs(veg))
-        
-        # extract vegetation type at subplots (SLOW)
-        message("... extracting vegetation type ...")
-        e$veg <- extract(veg, e)
-        
-        
-        ### slope and aspect for non-forest sites ###
-        
-        # load lLF slope/aspect data (slope and aspect are both in degrees)
-        slope <- raster(slope_file)
-        aspect <- raster(aspect_file)
-        NAvalue(slope) <- -9999
-        NAvalue(aspect) <- -9999
-        
-        # identify sites with wild, non-forest vegetation
-        nonforest_veg <- c("Herb", "Shrub", "Sparse", "Barren", "Snow-Ice")
-        nonforest <- read.dbf(veg_dbf_file) %>%
-                as_tibble() %>%
-                filter(EVT_LF %in% nonforest_veg)
-        nf <- e[e$veg %in% nonforest$Value,]
-        
-        # extract slope and aspect
-        message("... extracting slope ...")
-        nf$slope <- extract(slope, nf)
-        message("... extracting aspect ...")
-        nf$aspect <- extract(aspect, nf)
-        
-        # for LF variables, deal with LF and FIA encoding quirks for shallow slopes
-        nft <- nf %>% as.data.frame() %>% as_tibble() %>%
-                select(subplot_id, lon, lat, 
-                       slope_deg_lf = slope, 
-                       aspect_deg_lf = aspect) %>%
-                mutate(# in LF, "non-defined aspect (slope is less than or =2) are assigned a value of -1"
-                        slope_deg_lf = ifelse(slope_deg_lf <= 2, 0, slope_deg_lf),
-                        aspect_deg_lf = ifelse(slope_deg_lf == 0, 0, aspect_deg_lf),
-                        
-                        # replicate FIA encoding quirks for LF variables
-                        slope_pct_lf = tan(slope_deg_lf * pi / 180) * 100, 
-                        slope_deg_lf = ifelse(slope_pct_lf < 5, 0, slope_deg_lf)) %>%
-                select(-slope_pct_lf)
-        
-        # merge FIA topography with landfire topography
-        topo <- sp %>%
-                filter((lat < 50) == low_lat, is.finite(lat)) %>%
-                select(-lon, -lat) %>%
-                full_join(nft) %>%
-                rename(slope_pct = slope,
-                       aspect_deg = aspect) %>%
-                mutate(# slopes below 5% have aspect set to 360; set these to zero to avoid biasing exposure
-                        slope_pct = ifelse(slope_pct < 5, 0, slope_pct),
-                        slope_rad = atan(slope_pct/100),
-                        slope_deg = slope_rad * 180 / pi,
-                        
-                        # merge with nonforest topo, at stage when units match
-                        slope_deg = ifelse(is.na(slope_deg), slope_deg_lf, slope_deg),
-                        aspect_deg = ifelse(is.na(aspect_deg), aspect_deg_lf, aspect_deg),
-                        aspect_rad = aspect_deg/360*2*pi,
-                        slope_rad = slope_deg/360*2*pi) # not redundant -- have to recalculate post-merge
-        
-        # calculate northness and eastness
-        topo <- topo %>% mutate(northness = cos(aspect_rad) * sin(slope_rad),
-                                eastness = sin(aspect_rad) * sin(slope_rad)) %>%
-                filter(is.finite(northness),
-                       is.finite(lon)) %>%
-                select(-slope_deg_lf, -aspect_deg_lf)
-        
-        
-        ### TPI ###
-        message("... computing TPI ...")
-        
-        # mTPI neighborhood radii, in meters
-        radii <- c(100, 225, 500)
-        
-        # load elevation data
-        dem <- raster(elev_file)# %>% extend(50)
-        NAvalue(dem) <- -9999
-        
-        # precalculate focal matrices for each radius
-        fws <- list()
-        for(r in radii) fws[[paste0("r", r)]] <- focalWeight(dem, r, "circle")
-        
-        # coordinates for extraction
-        e <- topo %>% select(subplot_id, lon, lat)
-        coordinates(e) <- c("lon", "lat")
-        crs(e) <- crs(dem)
-        e <- crop(e, dem) %>% as.data.frame()
-        
-        # compute mTPI in parallel
-        options(future.rng.onMisuse="ignore")
-        plan(multisession, workers = detectCores() - 1)
-        tpi <- e %>%
-                select(x = lon, y = lat) %>%
-                future_pmap(., possibly(mtpi, NA_real_), r = radii, dem = dem)
-        e$tpi <- map_dbl(tpi, "mtpi")
-        e$tpis <- map_dbl(tpi, "mtpis")
-        topo <- e %>% select(subplot_id, tpi, tpis) %>% right_join(topo)
-        
-        return(topo)
 }
 
 
