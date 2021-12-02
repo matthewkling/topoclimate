@@ -116,9 +116,10 @@ d <- plot %>%
         mutate(PLOT_ID = paste(STATECD, UNITCD, COUNTYCD, PLOT),
                SUBPLOT_ID = paste(PLOT_ID, SUBP)) %>%
         filter(is.na(planted),
-               DESIGNCD %in% c(1, 506),
+               DESIGNCD %in% c(1, 111:118, 230:242, 311:323, 328, 501:506), # 4-subplot design
+               SUBP <= 4, # remove extraneous subplots
                MANUAL >= 1) %>% # for versions < 1, slope and aspect can't be attributed to subplots
-        select(PLT_CN, STATECD, UNITCD, COUNTYCD, PLOT, INVYR,
+        select(PLT_CN, STATECD, UNITCD, COUNTYCD, PLOT, SUBP, INVYR, DESIGNCD,
                PLOT_ID, SUBPLOT_ID, LON, LAT, ELEV, PLOT_STATUS_CD, POINT_NONSAMPLE_REASN_CD,
                SLOPE, ASPECT, GENUS, SPECIES) %>%
         clean_names() %>%
