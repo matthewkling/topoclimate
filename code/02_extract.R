@@ -39,6 +39,7 @@ sp <- read_csv(coordinates_file) %>%
   filter(is.finite(lon))
 
 # remove merging variables and select unique locations
+# (some plots w multiple slope/aspect measurements from resurveys are included twice)
 sp <- sp %>% 
   select(plot_id, subplot_id, lon, lat, slope, aspect) %>%
   distinct()
@@ -63,6 +64,7 @@ sp <- sp %>%
   select(-lon, -lat) %>%
   rename(lon = lon_sp, lat = lat_sp) %>%
   filter(is.finite(lon))
+# saveRDS(sp, "data/derived/fia_subplots_coords.rds")
 
 # coordinate reference system for FIA
 fia_crs <- "+init=epsg:4269 +proj=longlat +ellps=GRS80 +datum=NAD83"
@@ -91,7 +93,7 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
   
   ### slope and aspect for non-forest sites ###
   
-  # load lLF slope/aspect data (slope and aspect are both in degrees)
+  # load LF slope/aspect data (slope and aspect are both in degrees)
   slope <- raster(slope_file)
   aspect <- raster(aspect_file)
   NAvalue(slope) <- -9999
@@ -122,12 +124,13 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
       # replicate FIA encoding quirks for LF variables
       slope_pct_lf = tan(slope_deg_lf * pi / 180) * 100, 
       slope_deg_lf = ifelse(slope_pct_lf < 5, 0, slope_deg_lf)) %>%
-    select(-slope_pct_lf)
+    select(-slope_pct_lf) %>%
+    mutate(nonforest = TRUE)
   
   # merge FIA topography with landfire topography
   topo <- sp %>%
     filter((lat < 50) == low_lat, is.finite(lat)) %>%
-    select(-lon, -lat) %>%
+    # select(-lon, -lat) %>% # this is introducing an error downstream
     full_join(nft) %>%
     rename(slope_pct = slope,
            aspect_deg = aspect) %>%
@@ -139,8 +142,8 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
       # merge with nonforest topo, at stage when units match
       slope_deg = ifelse(is.na(slope_deg), slope_deg_lf, slope_deg),
       aspect_deg = ifelse(is.na(aspect_deg), aspect_deg_lf, aspect_deg),
-      aspect_rad = aspect_deg/360*2*pi,
-      slope_rad = slope_deg/360*2*pi) # not redundant -- have to recalculate post-merge
+      aspect_rad = aspect_deg / 180 * pi,
+      slope_rad = slope_deg / 180 * pi) # not redundant -- have to recalculate post-merge
   
   # calculate northness and eastness
   topo <- topo %>% mutate(northness = cos(aspect_rad) * sin(slope_rad),
@@ -165,9 +168,10 @@ topography <- function(sp, veg_file, veg_dbf_file, slope_file, aspect_file, elev
   for(r in radii) fws[[paste0("r", r)]] <- focalWeight(dem, r, "circle")
   
   # coordinates for extraction
-  e <- topo %>% select(subplot_id, lon, lat)
+  e <- sp %>% select(subplot_id, lon, lat)
   coordinates(e) <- c("lon", "lat")
-  crs(e) <- crs(dem)
+  crs(e) <- fia_crs
+  e <- spTransform(e, crs(dem))
   e <- crop(e, dem) %>% as.data.frame()
   
   # compute mTPI in parallel
