@@ -24,25 +24,23 @@ species <- readRDS("data/derived/species.rds")
 
 fia <- left_join(readRDS("data/derived/fia_topoclimate.rds"),
                  readRDS("data/derived/fia_occurrences.rds")) %>%
-        mutate(eastwind = wu * waniso,
-               northwind = wv * waniso,
-               speedwind = wspeed * waniso) %>%
+        mutate(wua = wu * waniso,
+               wva = wv * waniso) %>%
         select(plot_id, subplot_id, lon, lat, gs,
                bio1, bio12, bio5, bio6, wspeed,
                northness, eastness, tpi, tpis, windward,
-               eastwind, northwind, speedwind)
+               wua, wva)
 
 nfi <- left_join(readRDS("data/derived/cnfi_topoclimate.rds"),
                  readRDS("data/derived/cnfi_occurrences.rds")) %>%
         left_join(species %>% select(gs, genus, species) %>% na.omit()) %>%
         select(-genus, -species) %>%
-        mutate(eastwind = wu * waniso,
-               northwind = wv * waniso,
-               speedwind = wspeed * waniso) %>%
+        mutate(wua = wu * waniso,
+               wva = wv * waniso) %>%
         select(plot_id = nfi_plot, lon, lat, gs,
                bio1, bio12, bio5, bio6, wspeed,
                northness, eastness, tpi, tpis, windward,
-               eastwind, northwind, speedwind) %>%
+               wua, wva) %>%
         mutate(plot_id = as.character(plot_id))
 
 d <- bind_rows(fia, nfi) %>%
@@ -83,13 +81,13 @@ b <- expand_grid(
         spp = list(focal_species), 
         bbox = 10, 
         nbins = 4,
-        vars = list(c("bio5", "bio6", "bio12")),
-        avars = list(c("bio1", "eastwind", "northwind", "speedwind"),
-                     c("lat", "eastwind", "northwind", "speedwind"),
-                     c("lat")),
+        vars = list(c("bio5", "bio6", "bio12", "wua", "wva", "wspeed"),
+                    c("bio5", "bio6", "bio12", "wua", "wva", "wspeed", "lat"),
+                    c("bio5", "bio6", "bio12", "lat")),
+        avars = list(c("bio1")),
         topo_vars = list(c("northness", "eastness", "tpi")),
-        subplots = list(c(1:4),
-                        1))
+        subplots = list(1,
+                        1:4))
 
 # file paths for binned data
 b <- b %>% mutate(file_path = paste0("data/derived/binned/param_A", 1:nrow(.), ".rds"))
@@ -100,4 +98,4 @@ saveRDS(b, "data/derived/binned/metadata_A.rds")
 
 ### perform binning ###
 
-b %>% pmap(bin_data)
+b %>% pmap(bin_data, ncores = 1)
