@@ -29,3 +29,4 @@ vignettes/*.pdf
 # large data files
 data/raw/*
 gadm36_CAN_1_sp.rds
+*.DS_Store
