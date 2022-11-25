@@ -540,15 +540,17 @@ fit_pspline_model <- function(data_file = metadata[1,]$data_file,
 #         map(bg_job, wd = getwd(), model_function = fit_pspline_model)
 
 
+# ## version used on aws for recent ms draft
+# n_proc <- 1
+# metadata %>%
+#         slice(c(9, 11)) %>%
+#         select(data_file, out_dir, vars, topo_vars, mod_vars) %>%
+#         mutate(pml_redo = F, hmc_redo = T, 
+#                mod_file = "code/02_model/p_spline_d2.stan",
+#                out_dir = str_replace(out_dir, "param", "pbs_d2_k8d3_le5"),
+#                s_knots = 8, s_degree = 3, lambda = 5) %>%
+#         # pmap(fit_pspline_model) %>%
+#         split(rep(1:n_proc, nrow(.))[1:nrow(.)]) %>%
+#         map(bg_job, wd = getwd(), model_function = fit_pspline_model)
 
-n_proc <- 1
-metadata %>%
-        slice(c(9, 11)) %>%
-        select(data_file, out_dir, vars, topo_vars, mod_vars) %>%
-        mutate(pml_redo = F, hmc_redo = T, 
-               mod_file = "code/02_model/p_spline_d2.stan",
-               out_dir = str_replace(out_dir, "param", "pbs_d2_k8d3_le5"),
-               s_knots = 8, s_degree = 3, lambda = 5) %>%
-        # pmap(fit_pspline_model) %>%
-        split(rep(1:n_proc, nrow(.))[1:nrow(.)]) %>%
-        map(bg_job, wd = getwd(), model_function = fit_pspline_model)
+
