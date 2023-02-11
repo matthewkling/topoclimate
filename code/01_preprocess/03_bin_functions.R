@@ -1,6 +1,4 @@
 
-
-
 # function to generate binned data for all species
 bin_data <- function(spp,
                      subplots = 1:4, # indices of subplots to use
@@ -34,7 +32,6 @@ bin_data <- function(spp,
                 
                 require(tidyverse)
                 select <- dplyr::select
-                # if(!is.null(pb)) pb$tick()$print()
                 
                 # limit to geographic bounding box;
                 # classify subplot-level presences and absences

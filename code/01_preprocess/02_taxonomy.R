@@ -1,5 +1,5 @@
 
-# reconcile taxonomy between USFIA and CNFI
+# reconcile taxonomy between FIA and NFI
 
 library(tidyverse)
 
@@ -31,15 +31,5 @@ d <- d %>%
                               genus == "SALI" & species == "SCO" ~ "Salix scouleriana",
                               TRUE ~ gs))
 
-# occurrence counts across both datasets
-# d <- d %>%
-#         group_by(gs) %>%
-#         summarize(fia_plots = sum(unique(fia_plots), na.rm = T),
-#                   fia_subplots = sum(unique(fia_subplots), na.rm = T),
-#                   nfi_plots = sum(unique(nfi_plots), na.rm = T),
-#                   n_plots = rowSums(cbind(fia_plots, nfi_plots), na.rm = T),
-#                   genus = genus[!is.na(nfi_plots)][1],
-#                   species = species[!is.na(nfi_plots)][1])
-        
 # export
 d %>% saveRDS("data/derived/species.rds")

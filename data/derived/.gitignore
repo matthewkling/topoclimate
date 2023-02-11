@@ -3,3 +3,6 @@ topography.rds
 fia_subplots_coords.rds
 fia_topoclimate.rds
 cnfi_topoclimate.rds
+simulation_v0
+simulation_data_binned.rds
+*hmc

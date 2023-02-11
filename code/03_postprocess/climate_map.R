@@ -1,10 +1,10 @@
 
+# figure 4 panels a and b 
 
 library(tidyverse)
 library(raster)
 library(patchwork)
 select <- dplyr::select
-
 
 
 nfi <- readRDS("data/derived/cnfi_plots.rds")
@@ -65,7 +65,6 @@ map <- ggplot(d, aes(lon, lat, color = color)) +
                   xlim = c(-131, -69),
                   ylim = c(27, 70))
 
-
 gd <- f %>%
         select(bio1, bio12, color) %>%
         mutate(bio12 = log10(bio12+1),
@@ -81,7 +80,6 @@ gd <- f %>%
 
 
 sctr <- ggplot(d, aes(bio1, bio12, color = color)) +
-        # geom_point(data = clim, color = "gray80", size = .25) +
         geom_point(size = .25) +
         
         geom_path(data = gd, aes(bio1r, bio12r, group = bio1r), 
@@ -110,22 +108,8 @@ p <- sctr + map + plot_layout(widths = c(1, 1.5))
 ggsave("figures/plot_climate_map.png",
        p, width = 8, height = 3.78, units = "in", dpi = 1500)
 
-
 p <- sctr + map + plot_layout(widths = c(1, 1))
 ggsave("figures/plot_climate_map_v2.png",
        p, width = 8, height = 3.3, units = "in", dpi = 1500)
 
-
 saveRDS(gd, "data/derived/macroclimate_grid.rds")
-
-
-
-
-
-
-
-
-
-
-
-

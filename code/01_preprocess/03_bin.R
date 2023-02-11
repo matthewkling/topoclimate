@@ -1,8 +1,5 @@
 
 # This script summarizes subplot-level topoclimate data into bins.
-# inputs: fia_occurrences.rds, fia_topoclimate.rds, 
-        # cnfi_occurrences.rds, cnfi_topoclimate.rds, species.rds
-# outputs: various versions of binned data
 
 library(tidyverse)
 library(raster)
@@ -15,7 +12,7 @@ conflict_prefer("filter", "dplyr", quiet = T)
 conflict_prefer("extract", "raster", quiet = T)
 conflict_prefer("lag", "stats", quiet = T)
 
-source("code/03_bin_functions.r")
+source("code/01_preprocess/03_bin_functions.r")
 
 
 ## load and merge data ##################
@@ -47,7 +44,6 @@ d <- bind_rows(fia, nfi) %>%
 d <- d %>% mutate(subplot_id = ifelse(is.na(subplot_id), 
                                       paste(plot_id, "1"), subplot_id),
                   subplot = str_sub(subplot_id, -1, -1) %>% as.integer())
-
 
 
 # identify focal species -- those occurring on 100+ plots

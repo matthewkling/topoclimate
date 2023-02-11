@@ -3,9 +3,8 @@
 # and evaluating the fitted versus true topoclimate coefficients
 
 # 1) simulate data with known niches and topo effects
-# 2) summarize using actual binning function
 # 3) fit stan model
-# 4) test model ability to recover known deltas
+# 4) test model ability to recover known params
 
 library(tidyverse)
 library(furrr)
@@ -22,110 +21,109 @@ conflict_prefer("rstudent", "stats")
 
 
 # functions from elsewhere in the project
+source("code/01_preprocess/03_bin_functions.R")
 source("code/02_model/model_functions.r")
-source("code/03_bin_functions.r")
-source("code/03_postprocess/utils.R")
+source("code/utils.R")
+
+set.seed(123)
 
 
 # 1: simulate input data ######################################################
 
 # variables
 clim_vars <- c("bio5", "bio6", "bio12")
-topo_vars <- c("northness", "eastness", "tpi")
+topo_vars <- c("northness", "eastness", "windward", "tpi")
 mod_vars <- c("bio1", "bio12")
 
-set.seed(123)
+# load empirical data, to use as a structural template
+d <- readRDS("data/derived/binned/param_9.rds")$md %>% select(-wspeed)
 
 
-## landscape topography and macroclimate ############
+## microclimate ###########
 
-n <- 1000000
-plots <- data.frame(bio5 = rnorm(n),
-                    bio6 = rnorm(n),
-                    bio12 = rnorm(n),
-                    northness = rnorm(n),
-                    eastness = rnorm(n),
-                    tpi = rnorm(n)) %>%
-        mutate(bio1 = (bio5 + bio6) / 2,
-               plot_id = 1:nrow(.)) %>%
-        as_tibble()
+### generate basis functions of modifier variables ####
+z <- make_splines(x = ecdf(d[[mod_vars[1]]])(d[[mod_vars[1]]]),
+                  y = ecdf(d[[mod_vars[2]]])(d[[mod_vars[2]]]),
+                  knots = 8, degree = 3)
+adj <- tensor_adj(z, d = 2)
 
-
-## topoclimate ###########
-
-# random "true" coefficients for each modifier * topo * climate variable combination
-deltas <- expand_grid(clim_var = clim_vars,
-                      topo_var = topo_vars,
-                      mod_var = c("intercept", mod_vars)) %>%
-        mutate(effect = rnorm(nrow(.), 0, .1))
-
-# calculate plot topoclimate from topography, macroclimate, and these deltas
-# bio5micro = bio5 + northness_heat_effect * northness + eastness_heat_effect * eastness + tpi_heat_effect * tpi
-# northness_heat_effect = delta1 + delta2 * bio1 + delta3 * bio12
-topoclim <- plots %>%
-        mutate(bio12x = bio12,
-               intercept = 1) %>%
-        gather(clim_var, clim_value, all_of(clim_vars)) %>%
-        rename(bio12 = bio12x) %>%
-        gather(topo_var, topo_value, all_of(topo_vars)) %>%
-        gather(mod_var, mod_value, all_of(c("intercept", mod_vars))) %>%
-        full_join(deltas) %>%
-        
-        mutate(value = mod_value * effect) %>%
-        group_by(plot_id, clim_var, clim_value, topo_var, topo_value) %>%
-        summarize(topo_effect = sum(value)) %>%
-        
-        mutate(value = topo_value * topo_effect) %>%
-        group_by(plot_id, clim_var, clim_value) %>%
-        summarize(delta = sum(value)) %>%
-        mutate(micro_value = clim_value + delta) %>%
-        select(plot_id, clim_var, micro_value) %>%
-        spread(clim_var, micro_value) %>%
-        ungroup()
+adj <- map(1:length(topo_vars), function(i) adj + (i - 1) * ncol(z)) %>%
+        do.call("rbind", .)
+z <- topo_vars %>%
+        map(function(v) z * matrix(d[[v]], nrow(z), ncol(z))) %>%
+        do.call("cbind", .)
 
 
-## species niches ########
 
-# simulate random parameters for a multidimensional Gaussian niche
-make_species <- function(id, clim_vars){
-        
-        k <- length(clim_vars)
-        
-        # niche means
-        mu <- rnorm(k, 0, 2) %>% setNames(clim_vars)
-        
-        # niche variance-covariance
-        tau <- rgamma(k, shape = 2, scale = 1)
-        omega <- rlkjcorr(1, k, 1.5)
-        diag_tau <- matrix(0, k, k)
-        diag(diag_tau) <- tau
-        sigma <- diag_tau %*% omega %*% diag_tau
-        rownames(sigma) <- colnames(sigma) <- clim_vars
-        
-        # prevalence at niche optimum
-        alpha <- runif(1, .1, 1)
-        
-        list(id = id, mu = mu, sigma = sigma, alpha = alpha)
+### simulate random "true" known coefficients ####
+
+lambda <- 5 # smoothing parameter
+set.seed(1)
+
+# random starting values for deltas
+rdelta <- matrix(rnorm(ncol(z) * length(clim_vars), 0, 0.1), 
+                 ncol(z), length(clim_vars))
+adj2 = adj[,3]
+adj1 = adj[,2]
+adj0 = adj[,1]
+diffs <- (rdelta[adj0,] - (2 * rdelta[adj1,]) + rdelta[adj2,]) ^ 2
+
+# iteratively adjust delta values to match qualitative goals
+fx <- function(x){
+        delta <- matrix(x, ncol(z), length(clim_vars))
+        diffs <- (delta[adj0,] - (2 * delta[adj1,]) + delta[adj2,]) ^ 2
+        dnorm(mean(x), 0, .01, log = T) + 
+                dgamma(sd(x), 2, 100, log = T) +
+                dnorm(mean(diffs), 2, 1e6, log = T) + 
+                dgamma(sd(diffs), 2, 1e6, log = T)
 }
+opt <- optim(as.vector(rdelta), 
+             fx,
+             method = "BFGS",
+             control = list(fnscale = -1,
+                            trace = T,
+                            maxit = 1000))
+delta <- matrix(opt$par, ncol(z), length(clim_vars)) / 10
 
-nspp <- 20
-species <- letters[1:nspp] %>% map(make_species, clim_vars = clim_vars)
+
+### calculate microclimate for every data bin ####
+
+m <- d %>% select(all_of(clim_vars)) %>% as.matrix() # macroclimate
+topoclimate <- m + z %*% delta # microclimate
+topoclimate <- as.data.frame(topoclimate) %>% as_tibble()
+names(topoclimate) <- paste0(names(topoclimate), "m")
+d <- bind_cols(d, topoclimate)
 
 
-## species occurrences across landscape ######
+## populate plots with species ####
 
-# use species niche and plot microclimate to simulate occurrences across plots
-populate_landscape <- function(sp, ls){
+populate <- function(s){
         
-        # unpack niche parameters
-        mu <- sp$mu
-        sigma <- sp$sigma
-        alpha <- sp$alpha
+        message(s)
+        ds <- filter(d, species == s)
+        
+        # approximate niche params
+        mu <- ds %>%
+                summarize(bio5 = weighted.mean(bio5m, npres),
+                          bio6 = weighted.mean(bio6m, npres),
+                          bio12 = weighted.mean(bio12m, npres)) %>%
+                unlist()
+        
+        sigma <- ds %>% select(bio5m, bio6m, bio12m) %>% cov.wt(ds$npres^2 / ds$n)
+        sigma <- sigma$cov
+        
+        alpha <- ds %>%
+                mutate(delta = sqrt((bio5 - mu["bio5"])^2 + (bio6 - mu["bio6"])^2 + (bio12 - mu["bio12"])^2)) %>%
+                filter(delta < .5) %>%
+                summarize(p = sum(npres)/sum(n)) %>%
+                pull(p)
+        alpha <- pmin(alpha * 3, 1)
+        
         invsigma <- solve(sigma)
         k <- length(mu)
         
         # microclimate data matrix
-        x <- ls %>% select(all_of(names(mu))) %>% as.matrix()
+        x <- ds %>% select(bio5m, bio6m, bio12m) %>% as.matrix()
         n <- nrow(x)
         
         # occurrence probability on each plot (Gaussian probability surface)
@@ -143,114 +141,216 @@ populate_landscape <- function(sp, ls){
         p <- p / pmu[1,1] * alpha
         
         # sample random presences per occurrence probabilities
-        ls$p <- p
-        ls$occ <- rbernoulli(nrow(ls), ls$p)
-        ls$species <- sp$id
-        return(ls %>% filter(occ) %>% select(plot_id, species))
+        ds$p <- p
+        ds$occ <- rbinom(nrow(ds), ds$n, ds$p)
+        return(ds)
 }
 
-
-occ <- species %>% map_df(populate_landscape, ls = topoclim)
-
-plots <- left_join(plots, occ)
-
-
-
-## binned summaries ################
-
-d <- plots %>%
-        mutate(subplot_id = plot_id, subplot = 1,
-               lon = runif(nrow(.)), lat = runif(nrow(.)))
-
-b <- bin_data(spp = na.omit(unique(d$species)),
-              nbins = 4, 
-              vars = clim_vars,
-              topo_vars = topo_vars,
-              avars = "bio1",
-              ncores = 5,
-              file_path = NULL)
+b <- map_df(unique(na.omit(d$species)), populate) %>%
+        rename(npres_true = npres,
+               npres = occ) %>%
+        na.omit()
 
 
 
 # 2: fit model ################################################################
 
-fitfile <- "data/derived/stan/simulation.rds"
-fit <- b %>% 
-        fit_model(modfile = "code/02_model/model_optim.stan",
-                  outfile = fitfile,
-                  vars = clim_vars,
-                  topo_vars = topo_vars,
-                  mod_vars = mod_vars,
-                  engine = "pml", 
-                  iter = 10000,
-                  return = "object")
+fit_model <- function(md,
+                      mod_file = "code/02_model/model.stan",
+                      out_dir = "data/derived/simulation",
+                      s_knots = 8,
+                      s_degree = 3,
+                      pml_iters = 50000,
+                      lambda = 5){
+        
+        require(tidyverse)
+        require(cmdstanr)
+        
+        # file admin
+        pml_dir <- paste0(out_dir, "/pml")
+        pml_file <- paste0(pml_dir, "/fit.rds")
+        if(!dir.exists(out_dir)) dir.create(out_dir)
+        if(!dir.exists(pml_dir)) dir.create(pml_dir)
+        
+        # macroclimate matrix
+        vars <- clim_vars
+        m <- md %>% select(all_of(vars)) %>% as.matrix()
+        
+        # basis splines
+        z <- make_splines(ecdf(md[[mod_vars[1]]])(md[[mod_vars[1]]]),
+                          ecdf(md[[mod_vars[2]]])(md[[mod_vars[2]]]),
+                          knots = s_knots, degree = s_degree)
+        adj <- tensor_adj(z, d = 2)
+        
+        # topo matrix
+        adj <- map(1:length(topo_vars), function(i) adj + (i - 1) * ncol(z)) %>%
+                do.call("rbind", .)
+        z <- topo_vars %>%
+                map(function(v) z * matrix(md[[v]], nrow(z), ncol(z))) %>%
+                do.call("cbind", .)
+        
+        # data ranges
+        md$sp_id <- as.integer(factor(md$species))
+        m_min <- md %>% filter(npres > 0) %>% group_by(sp_id) %>% 
+                summarize_at(all_of(vars), min) %>% select(-sp_id) %>% as.matrix()
+        m_max <- md %>% filter(npres > 0) %>% group_by(sp_id) %>% 
+                summarize_at(all_of(vars), max) %>% select(-sp_id) %>% as.matrix()
+        
+        # model data
+        dat <- list(
+                K = ncol(m),
+                N = nrow(md),
+                S = length(unique(md$species)),
+                ss = md$sp_id,
+                D = ncol(z),
+                z = z,
+                
+                Nadj = nrow(adj),
+                adj2 = adj[,3],
+                adj1 = adj[,2],
+                adj0 = adj[,1],
+                lambda = lambda,
+                
+                y = md$npres,
+                m = m,
+                nn = md$n,
+                
+                s0 = md %>% mutate(i = 1:nrow(.)) %>% group_by(species) %>%
+                        summarize(start = min(i)) %>% pull(start),
+                s1 = md %>% mutate(i = 1:nrow(.)) %>% group_by(species) %>%
+                        summarize(end = max(i)) %>% pull(end),
+                
+                m_span = m_max - m_min,
+                m_min = m_min 
+        )
+        
+        # compile model
+        model <- cmdstan_model(mod_file)
+        
+        # fit with ML
+        file.remove(list.files(pml_dir, full.names = T))
+        fit <- model$optimize(
+                data = dat,
+                init = list(list(tau = matrix(1, dat$S, dat$K),
+                                 alpha = rep(.5, dat$S),
+                                 delta = matrix(0, dat$D, dat$K),
+                                 Lomega = array(0, c(dat$S, dat$K, dat$K)))),
+                sig_figs = 18,
+                iter = pml_iters,
+                seed = 123
+        )
+        
+        # save
+        fit$save_output_files(dir = pml_dir)
+        saveRDS(fit, pml_file)
+}
+
+fit_model(b)
+
 
 
 # 3: compare true and fitted effects ##########################################
 
-# d <- b
-md <- b$md
-mv <- b$mv
-dc <- b$dc
+## true effects ####
 
-lookup <- function(var){
-        list(bio5 = "heat", 
-             bio6 = "cold", 
-             bio12 = "moisture",
-             bio1 = "tmean")[[var]]
-}
+g <- expand_grid(bio1 = seq(-2, 2, .1),
+                 bio12 = seq(-2, 2, 1))
+zz <- make_splines(x = ecdf(d[[mod_vars[1]]])(g[[mod_vars[1]]]),
+                   y = ecdf(d[[mod_vars[2]]])(g[[mod_vars[2]]]),
+                   knots = 8, degree = 3)
+gzz <- zz %>%
+        as.data.frame() %>% as_tibble() %>%
+        setNames(paste0("b", 1:100)) %>%
+        bind_cols(g, .) %>%
+        gather(basis, basis_value, -bio1, -bio12)
 
-topo_mods1 <- c("int", mod_vars)
-params <- tibble(mod = rep(topo_mods1, length(topo_vars)),
-                 topo = rep(topo_vars, each = length(topo_mods1)))
+true <- delta %>%
+        as.data.frame() %>% as_tibble() %>%
+        setNames(clim_vars) %>%
+        mutate(basis = paste0("b", rep(1:100, length(topo_vars))),
+               topo_var = rep(topo_vars, each = 100)) %>%
+        gather(clim_var, delta, bio5:bio12)
+
+gzt <- full_join(gzz, true) %>%
+        group_by(bio1, bio12, topo_var, clim_var) %>%
+        summarize(effect = sum(basis_value * delta))
 
 
-get_deltas <- function(fitfile){
-        fit <- readRDS(fitfile)
-        f <- as.data.frame(fit$par) %>%
-                rownames_to_column("param") %>% as_tibble()
-        names(f)[2] <- "value"
-        
-        deltas <- f %>% 
-                filter(str_detect(param, "delta")) %>%
-                mutate(param = str_remove(param, "delta\\["),
-                       param = str_remove(param, "\\]"),
-                       param = str_replace(param, ",", "_")) %>%
-                separate(param, c("param", "var")) %>%
-                mutate(var = recode(var, 
-                                    "1" = lookup(clim_vars[1]), 
-                                    "2" = lookup(clim_vars[2]), 
-                                    "3" = lookup(clim_vars[3])),
-                       topo = params$topo[as.integer(param)],
-                       mod = params$mod[as.integer(param)])#,
-                       # mod = factor(mod, levels = params$mod[1:(length(topo_vars)+1)]))
-        deltas
-}
 
-fitted_deltas <- get_deltas(fitfile) %>%
-        rename(clim_var = var,
-               topo_var = topo,
-               mod_var = mod,
-               fitted = value) %>%
+## fitted effects ####
+
+fit <- as_cmdstan_fit("data/derived/simulation/pml/p_spline_d2-202301061343-1-229f68.csv")
+
+f <- as.data.frame(fit$mle()) %>%
+        setNames("value") %>%
+        rownames_to_column("param") %>%
+        filter(grepl("delta", param)) %>%
+        as_tibble() %>%
+        mutate(param = str_remove(param, "delta\\["),
+               param = str_remove(param, "\\]")) %>%
+        mutate(clim_var = rep(clim_vars, each = nrow(delta))) %>%
+        mutate(basis = rep(paste0("b", rep(1:100, length(topo_vars))), length(clim_vars)),
+               topo_var = rep(rep(topo_vars, each = 100), length(clim_vars))) %>%
         select(-param) %>%
-        mutate(clim_var = recode(clim_var,
-                                 "heat" = "bio5",
-                                 "cold" = "bio6",
-                                 "moisture" = "bio12"),
-               mod_var = ifelse(mod_var == "int", "intercept", mod_var))
+        rename(delta = value)
 
-p <- left_join(deltas, fitted_deltas) %>%
-        ggplot(aes(effect, fitted)) +
+gzf <- full_join(gzz, f) %>%
+        group_by(bio1, bio12, topo_var, clim_var) %>%
+        summarize(effect = sum(basis_value * delta))
+
+tf <- bind_rows(gzt %>% mutate(model = "simulated true effect"),
+                gzf %>% mutate(model = "fitted effect")) %>%
+        mutate(clim_var = factor(clim_var,
+                                 levels = c("bio12", "bio5", "bio6"),
+                                 labels = c("moisture", "high temperature", "low temperature")),
+               topo_var = factor(topo_var,
+                                 levels = c("northness", "eastness", "windward", "tpi"),
+                                 labels = c("northness", "eastness", "windward exposure", "elevational position")),
+               model = factor(model,
+                              levels = c("simulated true effect", "fitted effect")))
+
+
+## plots ####
+
+p <- tf %>%
+        ggplot(aes(bio1, effect, color = model, alpha = bio12, 
+                   group = paste(model, bio12))) + 
+        facet_grid(topo_var ~ clim_var) +
+        geom_hline(yintercept = 0, color = "gray") +
+        geom_line() +
+        theme_bw() +
+        theme(panel.grid = element_blank(),
+              strip.background = element_rect(fill = "black"),
+              strip.text = element_text(color = "white")) +
+        scale_alpha_continuous(range = c(.3, 1)) +
+        scale_color_manual(values = c("black", "red")) +
+        scale_x_continuous(expand = c(0,0), breaks = -1:1) +
+        labs(x = "macro annual temperature (std)",
+             y = "standardized effect of terrain variable on climate variable",
+             alpha = "macro annual\nprecipitation (std)")
+ggsave("figures/manuscript/simulation_true_fitted_curves.pdf", 
+       p, width = 8, height = 6, units = "in")
+
+p <- full_join(f %>% rename(fitted = delta),
+          true %>% rename(true = delta)) %>%
+        ggplot(aes(true, fitted)) +
+        geom_point(color = "dodgerblue", size = .5) +
         geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
-        geom_point(color = "darkred") +
-        geom_smooth(method = lm, se = F, color = "darkred", size = .25) +
+        geom_smooth(method = lm, se = F, color = "red", size = .25) +
         theme_minimal() +
         coord_fixed() +
-        scale_x_continuous(breaks = seq(-.1, .1, .1)) +
-        scale_y_continuous(breaks = seq(-.1, .1, .1)) +
+        scale_x_continuous(breaks = seq(-.2, .2, .1)) +
+        scale_y_continuous(breaks = seq(-.2, .2, .1)) +
         labs(x = "simulated true effect",
              y = "fitted model estimate")
-ggsave("figures/simulation/true_fitted_scatter.png", 
+ggsave("figures/manuscript/simulation_true_fitted_scatter.pdf", 
        p, width = 4, height = 4, units = "in")
 
 
+# calculate fit statistics
+full_join(f %>% rename(fitted = delta),
+          true %>% rename(true = delta)) %>%
+        summarize(r2 = cor(fitted, true),
+                  rmse = sqrt(mean((fitted - true)^2)),
+                  rmse_std = rmse / sd(true),
+                  nrmse = rmse / diff(range(true)))

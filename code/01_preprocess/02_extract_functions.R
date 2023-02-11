@@ -2,9 +2,8 @@
 # these functions are shared by the US and Canada extraction scripts
 
 
-
 # compute topographic position index (TPI) for a given point location
-# (standardized multi-scale TPI -- mTPIs sensu Theobald et al. (2015))
+# (standardized) multi-scale TPI, sensu Theobald et al. (2015)
 mtpi <- function(x, y, radii, dem, fws){
         
         # neighborhood elevation data for the largest radius
@@ -65,7 +64,7 @@ add_macroclimate <- function(sp){
         s <- spTransform(s, crs(clim))
         sp <- cbind(sp, extract(clim, s))
         
-        # log precip for normality
+        # log precip for normality and ecological relevance
         log10p1 <- function(x) log10(x+1)
         sp <- sp %>% 
                 filter(is.finite(bio1)) %>%
@@ -88,6 +87,7 @@ add_wind <- function(sp){
         s <- spTransform(s, crs(w))
         w <- raster::extract(w, s)
         sp <- cbind(sp, w)
+        message("mean anisotropy: ", mean(w[,"waniso"]))
         
         # calculate "windwardness": how strongly plot faces into prevailing wind
         # (depends on plot slope, plot aspect vs wind direction, wind anisotropy)
@@ -100,6 +100,5 @@ add_wind <- function(sp){
                 mutate(windiff = pi - anglediff(atan2(wv, wu), # downwind direction, 
                                                 atan2(northness, eastness)), # downslope direction
                        windward = cos(windiff) * sin(slope_rad) * waniso / mean(waniso))
-        
         return(sp)
 }
