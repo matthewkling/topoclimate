@@ -42,7 +42,7 @@ tc <- stack(tc, setNames(macro, paste0(names(macro), "nn")))
 # figure
 rgb_plot <- function(order, inversion, trans = "fit", data = d,
                      outdir = "figures/downscale/rgb/",
-                     test_plot = F, scatter = F, final = F){
+                     test_plot = F, final = F){
         
         require(tidyverse)
         require(patchwork)
@@ -81,11 +81,40 @@ rgb_plot <- function(order, inversion, trans = "fit", data = d,
         satellite <- magick::image_read("figures/downscale/idaho_satellite_cropped.png")
         aerial <- ggplot() + ggpubr::background_image(satellite)
         
-        scat <- magick::image_read("figures/downscale/scatterplot_3d_8_1.png")
-        scat <- ggplot() + ggpubr::background_image(scat)
+        # plot micro v macro
+        sd <- data %>% sample_n(100000)
+        s1 <- ggplot(sd, 
+                     aes(high_temp, moisture, color = color_micro)) +
+                geom_point() +
+                geom_point(aes(macro_bio5, macro_bio12), color = "black") +
+                scale_color_identity() +
+                labs(x = "High temp. (°C)",
+                     y = "Moisture (mm)")
+        s2 <- ggplot(sd, 
+                     aes(high_temp, low_temp, color = color_micro)) +
+                geom_point() +
+                geom_point(aes(macro_bio5, macro_bio6), color = "black") +
+                scale_color_identity() +
+                labs(x = "High temp. (°C)",
+                     y = "Low temp. (°C)")
+        s3 <- ggplot(sd, 
+                     aes(low_temp, moisture, color = color_micro)) +
+                geom_point() +
+                geom_point(aes(macro_bio6, macro_bio12), color = "black") +
+                scale_color_identity() +
+                labs(x = "Low temp. (°C)",
+                     y = "Moisture (mm)")
+        s <- s1 + s2 + s3 +
+                plot_layout(nrow = 1, widths = rep(1, 3)) & 
+                theme_minimal(base_size = 25) & 
+                theme(plot.margin = unit(c(0, 0, 0, 0), "in"))
+        tmp <- "figures/fig5d.png"
+        ggsave(tmp, s, width = 12.5, height = 5, units = "in")
+        scat <- ggplot() + ggpubr::background_image(magick::image_read(tmp))
+        file.remove(tmp)
         
-        p <- (pt | prgb_M) / (prgb_m) / (scat | aerial) +
-                plot_layout(heights = c(1, 2, 1), nrow = 3)
+        p <- aerial + pt + prgb_M + prgb_m + scat + 
+                plot_layout(ncol = 1)
         p <- p &
                 scale_x_continuous(expand = c(0, 0)) &
                 scale_y_continuous(expand = c(0, 0)) &
@@ -96,32 +125,16 @@ rgb_plot <- function(order, inversion, trans = "fit", data = d,
                       axis.ticks = element_blank(),
                       axis.line = element_blank())
         ggsave(paste0(outdir, "cmb_", inversion, "_", order, ".png"), 
-               p, width = 25, height = 20, units = "in")
+               p, width = 10, height = 20, units = "in")
         
         if(final) ggsave("figures/manuscript/downscale.png", 
-                         p, width = 25, height = 20, units = "in")
+                         p, width = 10, height = 20, units = "in")
         
-        if(scatter){
-                library("plotly")
-                sd <- data %>% sample_n(10000)
-                fig <- plotly::plot_ly(sd, x = ~high_temp, y = ~moisture, z = ~low_temp,
-                                       marker = list(color = sd$color_micro, size = 3)) %>%
-                        plotly::add_markers() %>%
-                        plotly::layout(scene = list(xaxis = list(title = 'High temp. (°C)',
-                                                                 dtick = 2, 
-                                                                 tick0 = 24, 
-                                                                 tickmode = "linear"),
-                                                    zaxis = list(title = 'Low temp. (°C)   ',
-                                                                 dtick = 2, 
-                                                                 tick0 = -8, 
-                                                                 tickmode = "linear"),
-                                                    yaxis = list(title = 'Moisture (mm)',
-                                                                 dtick = 100, 
-                                                                 tick0 = 450, 
-                                                                 tickmode = "linear")),
-                                       paper_bgcolor = "#c2c2c2",
-                                       plot_bgcolor = "#c2c2c2")
-                fig 
-        }
+        # check how many micro values are outside macro hull
+        hull <- data %>% select(macro_bio5, macro_bio6, macro_bio12) %>% geometry::convhulln()
+        data$in_hull <- data %>% select(high_temp, low_temp, moisture) %>% 
+                as.matrix() %>% geometry::inhulln(hull, .)
+        out <- 1 - mean(data$in_hull)
 }
+
 rgb_plot(1, 8, final = T)
