@@ -117,3 +117,106 @@ tensor_adj <- function(s, d = 1){
                 separate(x, paste0("i", 1:(d+1)), convert = T) %>% 
                 as.matrix()
 }
+
+
+define <- function(var, vars, define = T){
+        def <- function(var){
+                list(bio5 = "summer max temp", 
+                     bio6 = "winter min temp", 
+                     bio12 = "precipitation",
+                     bio1 = "tmean")[[var]]
+        }
+        recode(var,
+               "1" = def(vars[1]),
+               "2" = def(vars[2]),
+               "3" = def(vars[3]))
+        y <- recode(var,
+                    "1" = vars[1],
+                    "2" = vars[2],
+                    "3" = vars[3])
+        if(define) y <- recode(var,
+                               "1" = def(vars[1]),
+                               "2" = def(vars[2]),
+                               "3" = def(vars[3]))
+        return(y)
+}
+
+label_vars <- function(x){
+        data.frame(z = recode(as.character(x[,1]),
+                              "windward" = "windward exposure",
+                              "tpi" = "elevational position",
+                              "tpis" = "prominence",
+                              "bio12" = "moisture",
+                              "bio5" = "high temperature",
+                              "bio6" = "low temperature"))
+}
+
+label_vars2 <- function(x){
+        y <- data.frame(z = recode(as.character(x[,1]),
+                                   "windward" = "windward\nexposure",
+                                   "tpi" = "elevational\nposition",
+                                   "tpis" = "prominence",
+                                   "bio12" = "moisture",
+                                   "bio5" = "high temperature",
+                                   "bio6" = "low temperature"))
+        if(ncol(x)>1) y$z <- paste0(y$z, "\n", recode(as.character(x[,2]),
+                                                      "predicted" = "[predicted]",
+                                                      "observed" = "[observed]"))
+        y
+}
+
+set_order <- function(x) x %>%
+        mutate(clim_var = factor(clim_var, 
+                                 levels = c("bio12", "bio5", "bio6", "MEAN")),
+               topo_var = factor(topo_var, 
+                                 levels = c("northness", "eastness", "windward", "tpi", "MEAN")))
+
+
+
+GeomArrow2 <- ggplot2::ggproto("GeomArrow2", Geom,
+                               required_aes = c("x", "y", "mag", "angle"),
+                               default_aes = ggplot2::aes(color = "black", fill = "white", scale = 1),
+                               draw_key = draw_key_polygon,
+                               draw_panel = function(data, panel_scales, coord, scale = 1, 
+                                                     theta = 15, length = .5, alpha = 1) {
+                                       coords <- coord$transform(data, panel_scales)
+                                       
+                                       Mmag <- max(coords$mag)
+                                       coords$mag <- with(coords, mag/Mmag*coords$scale)
+                                       
+                                       coords$dx <- with(coords, cos(angle)*mag)*scale
+                                       coords$dy <- with(coords, sin(angle)*mag)*scale
+                                       
+                                       xx <- unit.c(unit(coords$x, "npc"), 
+                                                    unit(coords$x, "npc") + unit(coords$dx, "snpc"))
+                                       yy <- unit.c(unit(coords$y, "npc"), 
+                                                    unit(coords$y, "npc") + unit(coords$dy, "snpc"))
+                                       pol <- grid::polylineGrob(x = xx, y = yy,
+                                                                 default.units = "npc",
+                                                                 arrow = grid::arrow(angle = theta, type = "closed", 
+                                                                                     length = unit(length, "lines")),
+                                                                 gp = grid::gpar(col = coords$colour,
+                                                                                 fill = coords$fill,
+                                                                                 alpha = alpha),
+                                                                 id = rep(seq(nrow(coords)), 2))
+                                       pol
+                                       
+                               })
+
+geom_arrow2 <- function(mapping = NULL, data = NULL, stat = "identity",
+                        position = "identity", na.rm = FALSE, show.legend = NA,
+                        inherit.aes = TRUE, scale = 1, ...) {
+        layer(geom = GeomArrow2,
+              mapping = mapping,
+              data = data,
+              stat = stat,
+              position = position,
+              show.legend = show.legend,
+              inherit.aes = inherit.aes,
+              params = list(na.rm = na.rm, scale = scale, ...)
+        )
+}
+
+weighted.cor <- function(a, b, w) cov.wt(cbind(a, b), wt = w, cor = TRUE)$cor[1,2]
+decile <- function(x) floor(rank(x) / (length(x)+1) * 10)
+logit <- function(p) log(p / (1-p))

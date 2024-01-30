@@ -1,3 +1,5 @@
+// "full model": coupled topoclimate-niche model with multiple species and varying topoclimate effects
+
 data {
   int<lower=0> K; // number of niche dimensions
   int<lower=0> N; // number of data points

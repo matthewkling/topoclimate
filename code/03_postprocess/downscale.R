@@ -40,7 +40,7 @@ macro <- topoclimate.pred::macroclimate(e, "ngb")
 tc <- stack(tc, setNames(macro, paste0(names(macro), "nn")))
 
 # figure
-rgb_plot <- function(order, inversion, trans = "fit", data = d,
+rgb_plot <- function(order, inversion, trans = "none", data = d,
                      outdir = "figures/downscale/rgb/",
                      test_plot = F, final = F){
         
@@ -53,7 +53,7 @@ rgb_plot <- function(order, inversion, trans = "fit", data = d,
         y <- predict(pc, data %>% select(heat = bio5nn, cold = bio6nn, moisture = bio12nn))
         
         clr <- rbind(y, pc$x) %>% scale() %>%
-                colormap::colors3d(order = order, inversion = inversion, 
+                colors3d::colors3d(order = order, inversion = inversion, 
                                    trans = trans)
         data$color_macro <- clr[1:(length(clr)/2)]
         data$color_micro <- clr[(length(clr)/2+1):length(clr)]
@@ -86,21 +86,21 @@ rgb_plot <- function(order, inversion, trans = "fit", data = d,
         s1 <- ggplot(sd, 
                      aes(high_temp, moisture, color = color_micro)) +
                 geom_point() +
-                geom_point(aes(macro_bio5, macro_bio12), color = "black") +
+                geom_point(aes(bio5nn, bio12nn), color = "black") +
                 scale_color_identity() +
                 labs(x = "High temp. (°C)",
                      y = "Moisture (mm)")
         s2 <- ggplot(sd, 
                      aes(high_temp, low_temp, color = color_micro)) +
                 geom_point() +
-                geom_point(aes(macro_bio5, macro_bio6), color = "black") +
+                geom_point(aes(bio5nn, bio6nn), color = "black") +
                 scale_color_identity() +
                 labs(x = "High temp. (°C)",
                      y = "Low temp. (°C)")
         s3 <- ggplot(sd, 
                      aes(low_temp, moisture, color = color_micro)) +
                 geom_point() +
-                geom_point(aes(macro_bio6, macro_bio12), color = "black") +
+                geom_point(aes(bio6nn, bio12nn), color = "black") +
                 scale_color_identity() +
                 labs(x = "Low temp. (°C)",
                      y = "Moisture (mm)")
@@ -124,8 +124,8 @@ rgb_plot <- function(order, inversion, trans = "fit", data = d,
                       axis.title = element_blank(),
                       axis.ticks = element_blank(),
                       axis.line = element_blank())
-        ggsave(paste0(outdir, "cmb_", inversion, "_", order, ".png"), 
-               p, width = 10, height = 20, units = "in")
+        if(!final) ggsave(paste0(outdir, "cmb_", inversion, "_", order, ".png"), 
+                          p, width = 10, height = 20, units = "in")
         
         if(final) ggsave("figures/manuscript/downscale.png", 
                          p, width = 10, height = 20, units = "in")

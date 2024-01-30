@@ -13,6 +13,7 @@ metadata <- readRDS("data/derived/binned/metadata.rds") %>%
                out_dir = paste0("data/derived/stan/", 
                                 str_remove(basename(data_file), "\\.rds"))) %>%
         mutate(out_dir = str_replace(out_dir, "param", "pbs_d2_k8d3_le5"),
+               out_dir = str_replace(out_dir, "le5_9", "le5_bulk_9"),
                s_knots = 8, s_degree = 3) %>%
         filter(file.exists(paste0(out_dir, "/pml/fit.rds")))
 
@@ -27,106 +28,6 @@ load_samples <- function(fitdir){
                 mutate(i = 1:nrow(.)) %>%
                 gather(param, value, -i)
 }
-
-define <- function(var, vars, define = T){
-        def <- function(var){
-                list(bio5 = "summer max temp", 
-                     bio6 = "winter min temp", 
-                     bio12 = "precipitation",
-                     bio1 = "tmean")[[var]]
-        }
-        recode(var,
-               "1" = def(vars[1]),
-               "2" = def(vars[2]),
-               "3" = def(vars[3]))
-        y <- recode(var,
-                    "1" = vars[1],
-                    "2" = vars[2],
-                    "3" = vars[3])
-        if(define) y <- recode(var,
-                               "1" = def(vars[1]),
-                               "2" = def(vars[2]),
-                               "3" = def(vars[3]))
-        return(y)
-}
-
-label_vars <- function(x){
-        data.frame(z = recode(as.character(x[,1]),
-                              "windward" = "windward exposure",
-                              "tpi" = "elevational position",
-                              "tpis" = "prominence",
-                              "bio12" = "moisture",
-                              "bio5" = "high temperature",
-                              "bio6" = "low temperature"))
-}
-
-label_vars2 <- function(x){
-        y <- data.frame(z = recode(as.character(x[,1]),
-                                   "windward" = "windward\nexposure",
-                                   "tpi" = "elevational\nposition",
-                                   "tpis" = "prominence",
-                                   "bio12" = "moisture",
-                                   "bio5" = "high temperature",
-                                   "bio6" = "low temperature"))
-        if(ncol(x)>1) y$z <- paste0(y$z, "\n", recode(as.character(x[,2]),
-                                                      "predicted" = "[predicted]",
-                                                      "observed" = "[observed]"))
-        y
-}
-
-set_order <- function(x) x %>%
-        mutate(clim_var = factor(clim_var, 
-                                 levels = c("bio12", "bio5", "bio6", "MEAN")),
-               topo_var = factor(topo_var, 
-                                 levels = c("northness", "eastness", "windward", "tpi", "MEAN")))
-
-
-
-GeomArrow2 <- ggplot2::ggproto("GeomArrow2", Geom,
-                               required_aes = c("x", "y", "mag", "angle"),
-                               default_aes = ggplot2::aes(color = "black", fill = "white", scale = 1),
-                               draw_key = draw_key_polygon,
-                               draw_panel = function(data, panel_scales, coord, scale = 1, 
-                                                     theta = 15, length = .5, alpha = 1) {
-                                       coords <- coord$transform(data, panel_scales)
-                                       
-                                       Mmag <- max(coords$mag)
-                                       coords$mag <- with(coords, mag/Mmag*coords$scale)
-                                       
-                                       coords$dx <- with(coords, cos(angle)*mag)*scale
-                                       coords$dy <- with(coords, sin(angle)*mag)*scale
-                                       
-                                       xx <- unit.c(unit(coords$x, "npc"), 
-                                                    unit(coords$x, "npc") + unit(coords$dx, "snpc"))
-                                       yy <- unit.c(unit(coords$y, "npc"), 
-                                                    unit(coords$y, "npc") + unit(coords$dy, "snpc"))
-                                       pol <- grid::polylineGrob(x = xx, y = yy,
-                                                                 default.units = "npc",
-                                                                 arrow = grid::arrow(angle = theta, type = "closed", 
-                                                                                     length = unit(length, "lines")),
-                                                                 gp = grid::gpar(col = coords$colour,
-                                                                                 fill = coords$fill,
-                                                                                 alpha = alpha),
-                                                                 id = rep(seq(nrow(coords)), 2))
-                                       pol
-                                       
-                               })
-
-geom_arrow2 <- function(mapping = NULL, data = NULL, stat = "identity",
-                        position = "identity", na.rm = FALSE, show.legend = NA,
-                        inherit.aes = TRUE, scale = 1, ...) {
-        layer(geom = GeomArrow2,
-              mapping = mapping,
-              data = data,
-              stat = stat,
-              position = position,
-              show.legend = show.legend,
-              inherit.aes = inherit.aes,
-              params = list(na.rm = na.rm, scale = scale, ...)
-        )
-}
-
-
 
 
 predict_deltas <- function(md, # model metadata 
@@ -278,7 +179,6 @@ plot_trig <- function(){
 
 plot_delta_splines <- function(md = slice(metadata, 5)){
         
-        
         par <- basename(md$data_file) %>% str_remove("\\.rds")
         
         ## macroclimate grid ##
@@ -397,7 +297,7 @@ plot_delta_splines <- function(md = slice(metadata, 5)){
                 labs(x = "macro annual temperature (°C)",
                      color = "macro annual precipitation (mm)",
                      fill = "macro annual precipitation (mm)",
-                     y = "standardized effect of topographic variable on climate variable")
+                     y = "standardized effect of topographic variable on bioclimate variable")
         ggsave(paste0("figures/manuscript/", par, "_spline_lines_annotated.pdf"),
                p, width = 5, height = 9, units = "in")
         
@@ -432,11 +332,11 @@ plot_delta_splines <- function(md = slice(metadata, 5)){
                                                                abs(x), "%")) +
                 scale_x_continuous(expand = c(0, 0),
                                    breaks = c(-1, -.5, 0, .5, 1),
-                                   labels = c("-1", "-0.5\n(S 30° or\nSE/SW 45°)", "0\n(level or\ndue E/W)", "0.5\n(S 30° or\nNE/NW 45°)", "1")) +
+                                   labels = c("-1", "-0.5\n(S 30° or\nSE/SW 45°)", "0\n(level or\ndue E/W)", "0.5\n(N 30° or\nNE/NW 45°)", "1")) +
                 coord_cartesian(xlim = c(-1, 1),
                                 ylim = c(-40, 40)) +
                 labs(x = "northness",
-                     y = "microclimate moisture anomaly\nfrom landscape macroclimate")
+                     y = "bioclimate moisture anomaly\nfrom landscape macroclimate")
         ggsave(paste0("figures/manuscript/", par, "_topoclim_eg.pdf"),
                p, width = 4, height = 3.2, units = "in")
         
@@ -546,7 +446,7 @@ predict_suitability <- function(n, x){
                 matrix(nrow = length(fmu), byrow = T)
         falpha <- n %>% filter(param == "alpha") %>% pull(value)
         pmax <- dmvnorm(fmu, fmu, fsigma)
-        dmvnorm(x, fmu, fsigma) / pmax * falpha
+        dmvnorm(x[,sort(colnames(x))], fmu, fsigma) / pmax * falpha
 }
 
 # relationships between topography, macroclimate, and species occurrence
@@ -692,8 +592,8 @@ plot_topo_niche <- function(md = slice(metadata, 5)){
                                fill= guide_legend(reverse = T)) +
                         labs(y = "relative occurrence frequency",
                              x = expression(paste(Delta, " moisture (log10 mm)       ", Delta, " high temperature (°C)      ", Delta, " low temperature (°C)")),
-                             color = "topographic\nvalue\n(stdev)",
-                             fill = "topographic\nvalue\n(stdev)")
+                             color = "topography\nz-score\n(stdev)",
+                             fill = "topography\nz-score\n(stdev)")
                 
                 spp <- c("Quercus garryana", "Pinus contorta", "Ulmus rubra")
                 p_spp <- function(sp){
@@ -892,7 +792,7 @@ plot_niches <- function(md){
                 
                 pmax <- dmvnorm(fmu, fmu, fsigma)
                 
-                x %>%
+                x[,sort(colnames(x))] %>%
                         mutate(prob = dmvnorm(., fmu, fsigma) / pmax * falpha,
                                species = sp, i = iter)
         }
