@@ -4,8 +4,8 @@ data {
   int<lower=0> K; // number of niche dimensions
   int<lower=0> N; // number of data points
   matrix[N,K] m; // macroclimate
-  int<lower=0> nn[N]; // number of (sub)plots
-  int<lower=0> y[N]; // number of presences
+  array[N] int<lower=0> nn; // number of (sub)plots
+  array[N] int<lower=0> y; // number of presences
 }
 
 parameters {

@@ -6,8 +6,8 @@ data {
   int<lower=1> D; // number of deltas
   matrix[N,D] z; // microclimate predictors
   matrix[N,K] m; // macroclimate
-  int<lower=0> nn[N]; // number of (sub)plots
-  int<lower=0> y[N]; // number of presences
+  array[N] int<lower=0> nn; // number of (sub)plots
+  array[N] int<lower=0> y; // number of presences
 }
 
 parameters {
