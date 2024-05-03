@@ -5,18 +5,10 @@ library(furrr)
 source("code/utils.R")
 
 get_samples <- function(fit, seed = NULL){
-        # if(!is.null(seed)) set.seed(seed)
         samples <- fit$draws() %>% 
                 as.data.frame() %>% as_tibble() %>%
                 mutate(iter = 1:nrow(.)) %>%
                 gather(var, value, -iter)
-        # if(any(grepl("\\.", samples$var))){ # i.e. if data is not ML
-        #         samples <- samples %>%
-        #                 separate(var, c("chain", "var"), "\\.") %>%
-        #                 mutate(chain = as.integer(chain)) %>%
-        #                 filter(chain == sample(chain, 1), 
-        #                        iter == sample(iter, 1))
-        # }
         return(samples)
 }
 

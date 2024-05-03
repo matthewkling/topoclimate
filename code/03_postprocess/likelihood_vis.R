@@ -56,9 +56,77 @@ p <- ggplot() +
         theme(strip.text = element_text(color = "white"),
               strip.background = element_rect(fill = "black"),
               legend.position = "top") +
-        labs(#x = "\u0394 log likelihood (bioclimate minus macroclimate)",
-             x = "delta log likelihood (bioclimate minus macroclimate)",
+        labs(x = "delta log likelihood (bioclimate minus macroclimate)",
              y = "count (# species or # plots)",
              fill = "higher-performing predictor set  ")
 ggsave("figures/manuscript/validation_histograms.pdf",
        p, width = 9, height = 9, units = "in")
+
+
+
+# analysis 2: comparison to macro + topo #########################
+
+eval <- read_csv("data/derived/likelihoods_macro_topo.csv")
+
+pd <- eval %>%
+        mutate(model = case_when(incl_bio == 0 & incl_topo == 0 ~ "macroclim",
+                                 incl_bio == 0 & incl_topo == 1 ~ "macroclim_topo",
+                                 incl_bio == 1 & incl_topo == 0 ~ "bioclim",
+                                 incl_bio == 1 & incl_topo == 1 ~ "bioclim_topo")) %>%
+        group_by(model, domain, species) %>%
+        summarize(AUC = auc(n, npres, pred),
+                  loglike = weighted.mean(loglike, n),
+                  npres = sum(npres)) %>%
+        gather(metric, value, AUC, loglike) %>%
+        group_by(species, domain, metric) %>%
+        mutate(bioclim_topo = value[model == "bioclim_topo"] - value,
+               bioclim = value[model == "bioclim"] - value,
+               macroclim = value[model == "macroclim"] - value,
+               macroclim_topo = value[model == "macroclim_topo"] - value) %>%
+        gather(dmodel, dvalue, bioclim_topo:macroclim_topo) %>% 
+        filter(domain == "out-of-sample") %>%
+        mutate(model = factor(model, levels = c("bioclim_topo", "bioclim", "macroclim_topo", "macroclim"),
+                              labels = c("bioclim + topo", "bioclim", "macroclim + topo", "macroclim")),
+               dmodel = factor(dmodel, levels = c("bioclim_topo", "bioclim", "macroclim_topo", "macroclim"),
+                               labels = c("bioclim + topo", "bioclim", "macroclim + topo", "macroclim"))) %>%
+        group_by(metric, dmodel, model) %>%
+        mutate(sign = mean(dvalue) > 0,
+               p = paste0(round(mean(dvalue > 0), 2) * 100, "%"),
+               p = ifelse(model == dmodel, NA, p),
+               p = ifelse(species != species[1], NA, p),
+               y = quantile(dvalue, .75)) %>%
+        filter(dmodel == "bioclim",
+               model == "macroclim + topo")
+
+stats <- pd %>%
+        mutate(delta = dvalue) %>%
+        group_by(metric) %>%
+        summarize(prop_bio = mean(delta > 0),
+                  mean = mean(delta),
+                  wilcox_p = wilcox.test(delta)$p.value,
+                  xmax = max(delta))
+
+pd <- pd %>% mutate(sign = factor(sign(dvalue), levels = c(-1, 1), labels = c("macroclim + topo", "BISHOP"))) 
+
+p <- ggplot() +
+        facet_wrap(~metric, scales = "free_x") +
+        geom_histogram(data = pd, aes(dvalue, fill = sign, group = sign), boundary = 0) +
+        geom_text(data = stats, 
+                  aes(xmax, 0, label = paste0("mean = ", signif(mean, 2), ";  \n",
+                                              round(prop_bio * 100, 1), "% positive;  \n",
+                                              "p = ", signif(wilcox_p, 2), "  ")), 
+                  hjust = 1, vjust = -1, lineheight = .8, size = 3, color = "dodgerblue") +
+        scale_fill_manual(values = c("dodgerblue", "darkred")[2:1]) +
+        theme_bw() +
+        theme(strip.text = element_text(color = "white"),
+              strip.background = element_rect(fill = "black"),
+              legend.position = "top") +
+        labs(x = "difference in out-of-sample AUC or pointwise log likelihood (BISHOP minus standard SDM)",
+             y = "number of species",
+             fill = "higher-performing model  ")
+
+ggsave("figures/manuscript/validation_histograms_topo.pdf",
+       p, width = 9, height = 5, units = "in")
+
+
+

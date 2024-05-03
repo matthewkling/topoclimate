@@ -6,3 +6,6 @@ cnfi_topoclimate.rds
 simulation_v0
 simulation_data_binned.rds
 *hmc
+likelihoods_full_model.csv
+likelihoods_macro_topo.csv
+likelihoods_minimal_model.csv
